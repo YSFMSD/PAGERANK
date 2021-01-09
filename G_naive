@@ -1,0 +1,246 @@
+with Ada.IO_Exceptions;
+with Ada.Text_IO; use Ada.Text_IO;
+with Ada.Float_Text_IO; use Ada.Float_Text_IO;
+with Ada.Integer_Text_IO; use Ada.Integer_Text_IO;
+with Ada.Command_line; use Ada.Command_line;
+
+
+procedure G_naive is
+
+   No_Argument_Error : Exception;
+
+   File : Ada.Text_IO.File_Type;
+
+
+   --R�cup�ration des donn�es � partir de la ligne de commandes
+
+
+   --Fonction permettant d'obtenir le fichier '.net'
+   function Recuperer_nom_fichier return String is
+   begin
+      return Argument(Argument_Count);
+   end Recuperer_nom_fichier;
+
+   --Fonction permettant d'obtenir le coefficient alpha
+   function Recuperer_Alpha return Float is
+   i : Integer ;
+   alpha : Float;
+   begin
+          i := 1;
+          while Argument(i) /= "-A" and i < Argument_Count loop
+                    i := i + 1 ;
+          end loop;
+      if Argument(i) = "-A" then
+             alpha := Float'Value(Argument(i+1));
+         else
+             alpha := 0.85;
+          end if;
+
+          return alpha;
+   end Recuperer_Alpha;
+
+   --Fonction permettant d'obtenir le nombre maximal d'it�rations
+   function Recuperer_Itermax return Integer is
+      i : Integer ;
+      itermax : Integer;
+   begin
+          i := 1;
+          while Argument(i) /= "-I" and i < Argument_Count loop
+                    i := i + 1 ;
+          end loop;
+          if  Argument(i) = "-I" then
+                itermax := Integer'Value(Argument(i+1));
+          else
+               itermax := 150;
+          end if;
+          return itermax;
+    end Recuperer_Itermax;
+
+
+   --Fonction permettant d'obtenir le nombre des sites � partir de la premi�re ligne du fichier
+   function nb_sites(Nom_fichier : in string) return Integer is
+        nb_sites :  Integer;
+        begin
+            Open(File, In_File, Nom_Fichier);
+	         Get(File, nb_sites);
+             Close(File);
+            return nb_sites;
+   end nb_sites;
+
+    nbre_sites : constant Integer := nb_sites(Recuperer_nom_fichier); --Nombre de sites dans le fichier r�cup�r�
+
+    type T_ligne is array(1..nbre_sites) of Float;
+
+    type T_matrice is array(1..nbre_sites ,1..nbre_sites) of Float;
+
+    type T_ligne_int is array(1..nbre_sites) of Integer;
+
+   -- Obtention de la matrice H
+    procedure Obtenir_H(H: out T_matrice) is
+        File: Ada.Text_IO.File_Type;
+        i,j : Integer;
+        useless : Integer;
+        n : Integer;
+        Relations_sites : T_ligne_int;
+       begin
+            n := nbre_sites ;
+            Open(File, In_File, Recuperer_nom_fichier);
+            Get(File,useless);
+        for i in 1..n loop
+           for j in 1..n loop
+            H(i,j):= 0.0;
+           end loop;
+        end loop;
+      for i in 1..n loop
+         Relations_sites(i) := 0;
+      end loop;
+            while not end_of_File(File) loop
+                Get(File,i);
+                Get(File,j);
+                if H(i+1,j+1) = 0.0 then      ---tester si c'est un double
+                    H(i+1,j+1):= 1.0; -- Les identifiants commencent de 0 � N-1
+                    Relations_sites(i+1):=Relations_sites(i+1)+1;      ---- commencer � calculer le nombre de sites web
+                 end if;
+            end loop;
+            for i in 1..n loop
+                if Relations_sites(i)/=0 then --- il est possible qu'un site web n'a pas de relation
+                    for j in 1..n loop
+                        H(i,j):= H(i,j)/float(Relations_sites(i));
+                    end loop;
+                end if;
+           end loop;
+        Close(File);
+        end Obtenir_H;
+    --Obtention de la matrice S
+    procedure Obtenir_S(S : out T_matrice) is
+        Est_Puits : boolean;
+        j : integer;
+        n : Integer;
+    begin
+            n := nbre_sites;
+            Obtenir_H(S);
+            for i in 1..n loop
+                Est_Puits := True;
+                j:=1;
+                while Est_Puits and j < n loop
+                    if S(i,j) /= 0.0 then
+                        Est_Puits := False;
+                    end if;
+                    j:=j+1;
+                end loop;
+            if Est_Puits then
+                for k in 1..n loop
+                    S(i,k):= 1.0 / float(n);
+                end loop;
+            end if;
+            end loop;
+        end Obtenir_S;
+
+    --Obtention de la matrice G
+    procedure Obtenir_G(G:out T_matrice) is
+    n:  integer;
+    begin
+            n := nbre_sites ;
+            Obtenir_S(G);
+            for i in 1..nbre_sites loop
+                for j in 1..nbre_sites  loop
+                    G(i,j) := Recuperer_Alpha * G(i,j)+ (1.0 - Recuperer_Alpha) / float(n) ;
+                end loop;
+            end loop;
+        end Obtenir_G;
+
+      procedure Init_Liste_Poids(L : out T_Ligne ) is
+      n : Integer;
+      begin
+            n := nbre_sites;
+            for i in 1..n loop
+                L(i) := 1.0 / float(n);
+            end loop;
+        end Init_Liste_Poids;
+
+   --Tri � bulles pour la liste des poids
+   PROCEDURE Tri_Bulles(T: IN OUT T_ligne; Pos : OUT T_ligne_int) IS
+   Aux: Float;
+   Cle : Integer;
+   Tri_Fini: Boolean := False;
+   Nbre_Passes: Natural :=0;
+   BEGIN
+      For i in 1..nbre_sites loop
+         Pos(i) := i-1;
+      end loop;
+   WHILE NOT Tri_Fini LOOP
+
+      Nbre_Passes := Nbre_Passes + 1;
+      Tri_Fini := True;
+
+      FOR I IN T'First..T'Last-Nbre_Passes LOOP
+
+         IF T(I) < T(I+1) THEN
+            Tri_Fini := False;
+
+            Aux := T(I);
+            T(I) := T(I+1);
+            T(I+1) := Aux;
+
+             Cle := Pos(I);
+             Pos(I) := Pos(I+1);
+             Pos(I+1) := Cle;
+         END IF;
+      END LOOP;
+   END LOOP;
+
+   END Tri_Bulles;
+
+    G : T_matrice;
+    somme:  Float; --Pour le calcul matriciel de la lise Liste_Poids
+    Liste_Poids: T_ligne;
+    Liste_Sites : T_ligne_Int;
+
+  begin
+       if Argument_Count < 1 then
+           raise No_Argument_Error;
+       end if;
+       Obtenir_G(G) ;
+       Init_Liste_Poids(Liste_Poids); --Initialisation du vecteur pi
+
+       --
+       for i in 1 .. Recuperer_Itermax loop
+        	  for j in 1 .. nbre_sites loop
+            	Somme := 0.0;
+            	for k in  1 .. nbre_sites loop
+                	Somme := Somme + G(k,j) * Liste_Poids(k);
+           		end loop;
+              Liste_Poids(j) := Somme;
+        	end loop ;
+         end loop;
+         --Cr�ation du fichier Liste_Poids.minyari
+         Create(File, Out_File, "Liste_Poids.minyari");
+         for i in 1..nbre_sites loop
+           Put(File,Liste_Poids(i));
+           New_Line(File);
+
+         end loop;
+         Close(File);
+
+         --Cr�ation du fichier Poids.p
+         Create(File, Out_File, "Poids.p");
+         for i in 1..nbre_sites  loop
+            Put(File,Liste_Poids(i));
+            New_Line(File);
+         end loop;
+         Close(File);
+
+
+         Tri_Bulles(Liste_Poids,Liste_Sites);
+
+         --Cr�ation du fichier PageRank.ord
+         Create(File, Out_File, "PageRank.ord");
+         for i in 1..nbre_sites loop
+             Put(File,Liste_Sites(i));
+             New_Line(File);
+         end loop;
+        Close(File);
+
+ Exception
+	    when No_Argument_Error => Put_Line ("Il manque le nom du fichier en parametre.");
+    end G_naive;
